@@ -1,0 +1,140 @@
+// Prisma Schema: a "planta" do banco de dados.
+// Daqui o Prisma gera (1) as migrations SQL e (2) o Prisma Client (código JS).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Em Prisma 7 a URL de conexão NÃO fica aqui: ela está em prisma.config.js
+}
+
+// ---------------------------------------------------------------------------
+// USUÁRIOS
+// ---------------------------------------------------------------------------
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String   @db.VarChar(100)
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Lado "inverso" dos relacionamentos (não viram colunas em "users")
+  tasks         Task[]
+  refreshTokens RefreshToken[]
+  roles         UserRole[]
+  permissions   UserPermission[]
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// TAREFAS (1 usuário tem N tarefas)
+// ---------------------------------------------------------------------------
+model Task {
+  id          String   @id @default(uuid()) @db.Uuid
+  title       String   @db.VarChar(150)
+  description String?
+  completed   Boolean  @default(false)
+  userId      String   @map("user_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("tasks")
+}
+
+// ---------------------------------------------------------------------------
+// ROLES e PERMISSIONS (RBAC)
+// ---------------------------------------------------------------------------
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique @db.VarChar(50)
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique @db.VarChar(100)
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  users UserPermission[]
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+// Tabelas de junção (N:N explícito). A chave primária é composta:
+// o mesmo par (usuário, role) não pode existir duas vezes.
+model UserRole {
+  userId     String   @map("user_id") @db.Uuid
+  roleId     String   @map("role_id") @db.Uuid
+  assignedAt DateTime @default(now()) @map("assigned_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("users_roles")
+}
+
+model UserPermission {
+  userId       String   @map("user_id") @db.Uuid
+  permissionId String   @map("permission_id") @db.Uuid
+  assignedAt   DateTime @default(now()) @map("assigned_at")
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+  @@index([permissionId])
+  @@map("users_permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@map("roles_permissions")
+}
+
+// ---------------------------------------------------------------------------
+// REFRESH TOKENS (uma linha por refresh token emitido)
+// ---------------------------------------------------------------------------
+// id        -> vai dentro do JWT como "jti" (identificador único do token)
+// tokenHash -> SHA-256 do token (o token puro NUNCA é guardado)
+// familyId  -> todos os tokens de UMA sessão (login) compartilham o mesmo familyId
+// revokedAt -> preenchido quando o token foi usado (rotação), revogado (logout)
+//              ou invalidado por reuso. NULL = ainda utilizável.
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  tokenHash String    @map("token_hash") @db.VarChar(64)
+  familyId  String    @map("family_id") @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
